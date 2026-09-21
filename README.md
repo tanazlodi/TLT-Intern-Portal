@@ -2,20 +2,96 @@
 
 Learning prototype for FlutterFlow → Flask → Google Sheets. All sample records are fictional. **Use only fabricated names, emails, activities, and other fields. Never import real TLT user data.** Email validation restricts addresses to example.com/org/net; it cannot detect real names or sensitive free text.
 
-## Run locally
+## Run locally with Google Sheets
 
-From Terminal:
+Use two Terminal windows. Terminal 1 keeps the Flask server running. Terminal 2 sends mock records to the server, which writes them into Google Sheets.
+
+Before starting, confirm `.env` contains the Google Sheets settings described in **Google Sheets setup** below.
+
+### Terminal 1 — start Flask
+
+Open Terminal 1 and run:
+
+```sh
+cd "$HOME/Desktop/Intern Portal"
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+flask --app app run --port 5050
+```
+
+Leave Terminal 1 open while adding data. The last line should say that Flask is running at `http://127.0.0.1:5050`.
+
+If this is the first time you are setting up the project and `.venv` does not exist, run this once before the commands above:
 
 ```sh
 cd "$HOME/Desktop/Intern Portal"
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python app.py
 ```
 
-Open http://127.0.0.1:5000/api/health or http://127.0.0.1:5000/api/interns.
-The existing empty `.env` is preserved. Default `mock` mode requires no credentials, makes no Google requests, and resets its in-memory records each time the server restarts.
+### Terminal 2 — check the connection
+
+Open a second Terminal window and run:
+
+```sh
+curl -sS http://127.0.0.1:5050/api/health
+curl -sS http://127.0.0.1:5050/api/interns
+```
+
+The health response should include `"status":"ok"`, `"data_policy":"mock-only"`, and `"storage":"sheets"`. The interns response may initially be `[]`, which means the Google Sheet is connected but has no records yet.
+
+### Terminal 2 — add mock interns and hours
+
+Copy and run this entire block in Terminal 2. It creates three fictional interns, saves their generated IDs, and then creates five fictional hour entries using those IDs.
+
+```sh
+alex_id=$(curl -sS -X POST http://127.0.0.1:5050/api/interns \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alex Morgan","email":"alex.morgan@example.com","program":"Web Development","status":"Active"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["intern_id"])')
+
+sam_id=$(curl -sS -X POST http://127.0.0.1:5050/api/interns \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Sam Rivera","email":"sam.rivera@example.org","program":"Data Analytics","status":"Active"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["intern_id"])')
+
+taylor_id=$(curl -sS -X POST http://127.0.0.1:5050/api/interns \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Taylor Lee","email":"taylor.lee@example.net","program":"Digital Skills","status":"Inactive"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["intern_id"])')
+
+curl -sS -X POST http://127.0.0.1:5050/api/hours \
+  -H 'Content-Type: application/json' \
+  -d "{\"intern_id\":\"$alex_id\",\"date\":\"2026-09-15\",\"hours\":3,\"activity\":\"Mock Flask API practice\"}"
+
+curl -sS -X POST http://127.0.0.1:5050/api/hours \
+  -H 'Content-Type: application/json' \
+  -d "{\"intern_id\":\"$alex_id\",\"date\":\"2026-09-16\",\"hours\":2.5,\"activity\":\"Mock endpoint testing\"}"
+
+curl -sS -X POST http://127.0.0.1:5050/api/hours \
+  -H 'Content-Type: application/json' \
+  -d "{\"intern_id\":\"$sam_id\",\"date\":\"2026-09-15\",\"hours\":4,\"activity\":\"Mock spreadsheet analysis\"}"
+
+curl -sS -X POST http://127.0.0.1:5050/api/hours \
+  -H 'Content-Type: application/json' \
+  -d "{\"intern_id\":\"$sam_id\",\"date\":\"2026-09-17\",\"hours\":1.5,\"activity\":\"Mock dashboard review\"}"
+
+curl -sS -X POST http://127.0.0.1:5050/api/hours \
+  -H 'Content-Type: application/json' \
+  -d "{\"intern_id\":\"$taylor_id\",\"date\":\"2026-09-18\",\"hours\":2,\"activity\":\"Mock orientation exercise\"}"
+```
+
+Each successful request prints the record that was created. Refresh the `Interns` and `Hours` tabs in Google Sheets to see the new rows.
+
+### Terminal 2 — verify the saved data
+
+```sh
+curl -sS http://127.0.0.1:5050/api/interns
+curl -sS http://127.0.0.1:5050/api/hours
+```
+
+Run the population block only once unless you intentionally want additional rows. Running it again creates another set of mock records.
+
+To stop Flask, return to Terminal 1 and press `Control-C`.
 
 ## Structure
 
@@ -30,7 +106,7 @@ The existing empty `.env` is preserved. Default `mock` mode requires no credenti
 
 | Method | Path | Result |
 | --- | --- | --- |
-| GET | `/api/health` | Backend mode and process health (not a Google connectivity check) |
+| GET | `/api/health` | Backend mode and process health |
 | GET / POST | `/api/interns` | List / create |
 | GET / PUT / DELETE | `/api/interns/<intern_id>` | Read / replace / delete |
 | GET / POST | `/api/hours` | List / create |
@@ -38,40 +114,45 @@ The existing empty `.env` is preserved. Default `mock` mode requires no credenti
 
 POST and PUT require exactly the writable fields below; IDs are generated by the server and retained on update. Responses are JSON objects, or arrays for lists. Creation returns 201, deletion 204, invalid input 400, missing IDs 404, and deleting an intern with hours returns 409.
 
-```sh
-curl -X POST http://127.0.0.1:5000/api/interns \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Jane Doe","email":"jane@example.com","program":"Mock Training","status":"Active"}'
-
-curl -X POST http://127.0.0.1:5000/api/hours \
-  -H 'Content-Type: application/json' \
-  -d '{"intern_id":"INT001","date":"2026-09-01","hours":2,"activity":"Mock training exercise"}'
-```
-
 Status must be Active or Inactive. Hours must be numeric, greater than zero and at most 24. Dates use YYYY-MM-DD. Intern references must exist. Delete related hours before deleting an intern.
 
-## Optional Google Sheets connection
+## Google Sheets setup
 
 1. Create a Google Cloud test project, enable the Google Sheets API, and create an OAuth 2.0 Client ID with application type **Desktop app**. Keep its downloaded JSON file in `credentials/` (ignored by Git); never upload it into FlutterFlow or commit it.
-2. Create a **new, dedicated dummy-data spreadsheet** owned by the Google account you will authorize.
+2. Create a new, dedicated dummy-data spreadsheet owned by the Google account you will authorize.
 3. Add tabs with these exact names and header rows in A1:E1:
 
    - `Interns`: `intern_id`, `name`, `email`, `program`, `status`
    - `Hours`: `entry_id`, `intern_id`, `date`, `hours`, `activity`
 
-4. Copy the settings from `.env.example` into `.env`. Set `STORAGE_BACKEND=sheets`, `MOCK_SHEET_CONFIRMED=true`, `GOOGLE_SHEET_ID` to the ID from the spreadsheet URL, `GOOGLE_AUTH_MODE=oauth`, `GOOGLE_OAUTH_CLIENT_FILE` to the downloaded client JSON path, and `GOOGLE_OAUTH_TOKEN_FILE` to an ignored local token path such as `credentials/oauth-token.json`. Restart Flask. The first run opens Google authorization in your browser; approve access using the account that owns the dummy spreadsheet. Later runs refresh the saved token automatically.
-5. Create fake records through the API, then use the returned intern ID when creating hours. Sheets mode does not automatically seed or overwrite a sheet. The list endpoint checks headers on first access.
+4. Configure `.env` with these settings, using your actual spreadsheet ID and local credential paths:
+
+```dotenv
+STORAGE_BACKEND=sheets
+MOCK_SHEET_CONFIRMED=true
+GOOGLE_SHEET_ID=1JS2LvJ2cThWV8ZskOepexg5fM7VsjAKkvZX0TbBfYLI
+GOOGLE_AUTH_MODE=oauth
+GOOGLE_OAUTH_CLIENT_FILE=/Users/tanazlodi/Desktop/Intern Portal/credentials/oauth-client.json
+GOOGLE_OAUTH_TOKEN_FILE=/Users/tanazlodi/Desktop/Intern Portal/credentials/oauth-token.json
+GOOGLE_APPLICATION_CREDENTIALS=
+```
+
+5. Restart Flask after changing `.env`. On the first Google Sheets request, OAuth may open an authorization page. Later requests reuse the saved OAuth token, so the authorization page normally does not open again.
+
+The OAuth client JSON is different from a service-account key. This project uses the OAuth client JSON and saved OAuth token to access the mock spreadsheet through the authorized Google account.
 
 Writes use `RAW` to store strings literally. Deletes clear that record's A:E cells, leaving an empty row. The sheet must contain only these tables, with unique IDs and no manual edits while requests run. This adapter is a single-process teaching prototype: it lacks transactions and coordination across servers or external sheet edits.
 
 ## Tests and next steps
 
 ```sh
+cd "$HOME/Desktop/Intern Portal"
+source .venv/bin/activate
 python -m unittest discover -s tests -v
 ```
 
-Tests exercise mock CRUD, validation, and relationship protection. A live Sheets connection needs your own test credentials and has not been verified by these tests.
+Tests exercise mock CRUD, validation, and relationship protection. A live Sheets connection needs your own test credentials and is not exercised by the automated tests.
 
-Next, connect FlutterFlow API calls to these routes and map the JSON fields. A browser frontend needs explicitly configured CORS for its actual origin; a phone needs a reachable backend address rather than the phone's localhost. Before exposing the server, add application user authentication and authorization and use a production deployment setup. Google service-account authentication only authorizes Flask to access Sheets; it does not authenticate portal users. No CORS or user authentication is included in this local scaffold.
+Next, connect FlutterFlow API calls to these routes and map the JSON fields. A browser frontend needs explicitly configured CORS for its actual origin; a phone needs a reachable backend address rather than the phone's localhost. Before exposing the server, add application user authentication and authorization and use a production deployment setup.
 
 References: [Flask application factories](https://flask.palletsprojects.com/en/stable/patterns/appfactories/), [Google Sheets values API](https://developers.google.com/workspace/sheets/api/guides/values).
